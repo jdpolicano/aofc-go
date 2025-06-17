@@ -70,18 +70,24 @@ func (c Coordinate) move(dir int) Coordinate {
 	return Coordinate{-1, -1}
 }
 
+type Distinct struct {
+	dir int
+	c   Coordinate
+}
+
 type Board struct {
 	data       [][]byte
 	coordinate Coordinate
 	direction  int
-	visited    int
+	visited    map[Distinct]bool
 	done       bool
+	isCycle    bool
 }
 
 func NewBoard(b [][]byte) *Board {
 	startPos := getStartPos(b)
 	if isValid(b, startPos) {
-		return &Board{b, startPos, Up, 1, false}
+		return &Board{b, startPos, Up, make(map[Distinct]bool, 1024), false, false}
 	}
 	return nil
 }
@@ -93,18 +99,25 @@ func (b *Board) Run() {
 }
 
 func (b *Board) move() {
+	key := Distinct{b.direction, b.coordinate}
+	if b.visited[key] {
+		b.done = true
+		b.isCycle = true
+		return
+	}
+	b.visited[key] = true
 	next := b.coordinate.move(b.direction)
 	value := b.get(next)
 	switch value {
 	case OutBounds:
 		{
 			b.done = true
+			b.coordinate = next
 			return
 		}
 	case Guard, Empty:
 		{
 			b.data[next.row][next.col] = Visited
-			b.visited++
 			b.coordinate = next
 			return
 		}
@@ -172,10 +185,34 @@ func main() {
 	}
 	trimmed := bytes.Trim(b, "\n\r\t ")
 	lines := bytes.Split(trimmed, []byte("\n"))
-
-	board := NewBoard(lines)
-	board.Run()
-	fmt.Println(board.visited)
-
+	waysToCycle := 0
+	for i := range lines {
+		for j := range lines[i] {
+			if lines[i][j] == Guard {
+				continue
+			}
+			cp := deepCopyBytes(lines)
+			cp[i][j] = Obstacle
+			board := NewBoard(cp)
+			board.Run()
+			if board.isCycle {
+				waysToCycle++
+			}
+		}
+	}
+	fmt.Println(waysToCycle)
 	return
+}
+
+func deepCopyBytes(original [][]byte) [][]byte {
+	if original == nil {
+		return nil
+	}
+
+	cp := make([][]byte, len(original))
+	for i, inner := range original {
+		cp[i] = make([]byte, len(inner))
+		copy(cp[i], inner)
+	}
+	return cp
 }
