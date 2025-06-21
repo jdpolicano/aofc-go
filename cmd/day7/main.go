@@ -6,6 +6,8 @@ import (
 	"log"
 	"os"
 	"strconv"
+	"sync"
+	"sync/atomic"
 )
 
 type Equation struct {
@@ -93,14 +95,19 @@ func main() {
 	trimmed := bytes.Trim(b, "\n\r\t ")
 	lines := bytes.Split(trimmed, []byte("\n"))
 	sum := int64(0)
+	wg := &sync.WaitGroup{}
 	for _, line := range lines {
-		equation := ParseEquation(string(line))
-		if equation.IsSolvable() {
-			fmt.Println("Solvable:", equation)
-			sum += equation.sum
-		} else {
-			fmt.Println("Not solvable:", equation)
-		}
+		wg.Add(1)
+		go runLine(line, &sum, wg)
 	}
-	fmt.Println("Total sum of solvable equations:", sum)
+	wg.Wait()
+	fmt.Println("Total sum of solvable equations:", atomic.LoadInt64(&sum))
+}
+
+func runLine(line []byte, sum *int64, wg *sync.WaitGroup) {
+	equation := ParseEquation(string(line))
+	if equation.IsSolvable() {
+		atomic.AddInt64(sum, equation.sum)
+	}
+	wg.Done()
 }

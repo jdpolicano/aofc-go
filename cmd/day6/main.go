@@ -28,6 +28,13 @@ func NewCoordinate(row, col int) Coordinate {
 	return Coordinate{row, col}
 }
 
+func (c Coordinate) get(data [][]byte) byte {
+	if !isValid(data, c) {
+		return OutBounds
+	}
+	return data[c.row][c.col]
+}
+
 func (c Coordinate) up() Coordinate {
 	return Coordinate{c.row - 1, c.col}
 }
@@ -44,7 +51,21 @@ func (c Coordinate) right() Coordinate {
 	return Coordinate{c.row, c.col + 1}
 }
 
+func (c Coordinate) dist(other Coordinate) int {
+	diff := 0
+	if c.row == other.row {
+		diff = c.col - other.col
+	} else {
+		diff = c.row - other.row
+	}
+	if diff < 0 {
+		return -diff
+	}
+	return diff
+}
+
 func (c Coordinate) move(dir int) Coordinate {
+	var none Coordinate
 	switch dir {
 	case Up:
 		{
@@ -65,101 +86,86 @@ func (c Coordinate) move(dir int) Coordinate {
 	default:
 		{
 			log.Fatal("unknown direction", dir)
-		}
-	}
-	return Coordinate{-1, -1}
-}
-
-type Distinct struct {
-	dir int
-	c   Coordinate
-}
-
-type Board struct {
-	data       [][]byte
-	coordinate Coordinate
-	direction  int
-	visited    map[Distinct]bool
-	done       bool
-	isCycle    bool
-}
-
-func NewBoard(b [][]byte) *Board {
-	startPos := getStartPos(b)
-	if isValid(b, startPos) {
-		return &Board{b, startPos, Up, make(map[Distinct]bool, 1024), false, false}
-	}
-	return nil
-}
-
-func (b *Board) Run() {
-	for !b.done {
-		b.move()
-	}
-}
-
-func (b *Board) move() {
-	key := Distinct{b.direction, b.coordinate}
-	if b.visited[key] {
-		b.done = true
-		b.isCycle = true
-		return
-	}
-	b.visited[key] = true
-	next := b.coordinate.move(b.direction)
-	value := b.get(next)
-	switch value {
-	case OutBounds:
-		{
-			b.done = true
-			b.coordinate = next
-			return
-		}
-	case Guard, Empty:
-		{
-			b.data[next.row][next.col] = Visited
-			b.coordinate = next
-			return
-		}
-	case Visited:
-		{
-			b.coordinate = next
-			return
-		}
-	case Obstacle:
-		{
-			b.turn()
-			return
+			// unreachable
+			return none
 		}
 	}
 }
 
-func (b *Board) get(c Coordinate) byte {
-	if !isValid(b.data, c) {
-		return OutBounds
-	}
-	return b.data[c.row][c.col]
+type JumpTable struct {
+	tbl  [][][]Coordinate // three dimensions, ([row][col][destination if you go one of four directions]
+	data [][]byte
 }
 
-func (b *Board) turn() {
-	switch b.direction {
+func BuildJumpTable(grid [][]byte) *JumpTable {
+	tbl := make([][][]Coordinate, len(grid))
+	visited := make([][][]bool, len(grid))
+	for i := range grid {
+		tbl[i] = make([][]Coordinate, len(grid[i]))
+		visited[i] = make([][]bool, len(grid[i]))
+		for j := range grid[i] {
+			tbl[i][j] = make([]Coordinate, 4)
+			visited[i][j] = make([]bool, 4)
+		}
+	}
+	jmp := &JumpTable{tbl: tbl, data: grid}
+	for i := range len(tbl) {
+		for j := range len(tbl[i]) {
+			co := NewCoordinate(i, j)
+			jmp.Update(co, Up, visited)
+			jmp.Update(co, Right, visited)
+			jmp.Update(co, Down, visited)
+			jmp.Update(co, Left, visited)
+		}
+	}
+	return jmp.tbl
+}
+
+func (jmp *JumpTable) Update(start Coordinate, dir int, visited [][][]bool) Coordinate {
+	if visited[start.row][start.col][dir] {
+		return jmp.tbl[start.row][start.col][dir]
+	}
+	next := start.move(dir)
+	if !isValid(jmp.data, next) {
+		visited[start.row][start.col][dir] = true
+		jmp.tbl[start.row][start.col][dir] = next
+		return next
+	}
+	if next.get(jmp.data) == Obstacle {
+		visited[start.row][start.col][dir] = true
+		jmp.tbl[start.row][start.col][dir] = start
+		return start
+	}
+	visited[start.row][start.col][dir] = true
+	jmp.tbl[start.row][start.col][dir] = jmp.Update(next, dir, visited)
+	return jmp.tbl[start.row][start.col][dir]
+}
+
+func (jmp *JumpTable) get(start Coordinate, dir int) Coordinate {
+	return jmp.tbl[start.row][start.col][dir]
+}
+
+func turn(direction int) int {
+	switch direction {
 	case Up:
 		{
-			b.direction = Right
+			return Right
 		}
 	case Right:
 		{
-			b.direction = Down
+			return Down
 		}
 	case Down:
 		{
-			b.direction = Left
+			return Left
 		}
 	case Left:
 		{
-			b.direction = Up
+			return Up
 		}
 	}
+	log.Fatal("direction should be an enum")
+	return -1
 }
 
 func getStartPos(b [][]byte) Coordinate {
@@ -170,7 +176,8 @@ func getStartPos(b [][]byte) Coordinate {
 			}
 		}
 	}
-	return NewCoordinate(-1, -1)
+	log.Fatal("getStartPos() No guard found")
+	return NewCoordinate(0, 0)
 }
 
 func isValid(b [][]byte, c Coordinate) bool {
@@ -185,30 +192,28 @@ func main() {
 	}
 	trimmed := bytes.Trim(b, "\n\r\t ")
 	lines := bytes.Split(trimmed, []byte("\n"))
-	waysToCycle := 0
-	for i := range lines {
-		for j := range lines[i] {
-			if lines[i][j] == Guard {
-				continue
-			}
-			cp := deepCopyBytes(lines)
-			cp[i][j] = Obstacle
-			board := NewBoard(cp)
-			board.Run()
-			if board.isCycle {
-				waysToCycle++
-			}
+	jmp := BuildJumpTable(lines)
+	curr := getStartPos(jmp.data)
+	dist := 0
+	direction := Up
+	quit := false
+	for !quit {
+		next := jmp.get(curr, direction)
+		nextNeighbor := next.move(direction)
+		if !isValid(jmp.data, nextNeighbor) {
+			break
 		}
+		dist += curr.dist(next)
+		curr = next
+		direction = turn(direction)
 	}
-	fmt.Println(waysToCycle)
-	return
+	fmt.Println(dist)
 }
 
 func deepCopyBytes(original [][]byte) [][]byte {
 	if original == nil {
 		return nil
 	}
-
 	cp := make([][]byte, len(original))
 	for i, inner := range original {
 		cp[i] = make([]byte, len(inner))
@@ -216,3 +221,16 @@ func deepCopyBytes(original [][]byte) [][]byte {
 	}
 	return cp
 }
+
+// lines := [][]byte{
+// 	{'.', '.', '.', '#', '.', '.', '#', '.', '.', '.'},
+// 	{'.', '.', '.', '.', '.', '.', '.', '.', '.', '.'},
+// 	{'.', '.', '.', '.', '.', '.', '.', '.', '.', '.'},
+// 	{'.', '.', '.', '#', '.', '.', '.', '.', '.', '.'},
+// 	{'.', '.', '.', '.', '.', '.', '.', '.', '.', '.'},
+// 	{'.', '.', '.', '.', '.', '.', '.', '.', '.', '.'},
+// 	{'.', '.', '.', '.', '.', '.', '.', '.', '.', '.'},
+// 	{'.', '.', '.', '.', '.', '.', '.', '.', '.', '.'},
+// 	{'.', '.', '.', '.', '.', '.', '.', '.', '.', '.'},
+// 	{'.', '.', '.', '.', '.', '.', '.', '.', '.', '.'},
+// }
