@@ -192,28 +192,27 @@ func (jmp JumpTable) UpdateDirection(data [][]byte, start Coordinate, dir Direct
 }
 
 func (jmp JumpTable) AddObstacle(grid [][]byte, center Coordinate) []ChangeRecord {
-    changeSet := make([]ChangeRecord, 0, 256)
+	changeSet := make([]ChangeRecord, 0, 256)
+	// We're going to pretend grid[center] = Obstacle here,
+	// but we don't need to modify grid itself if we update jmp.
+	for _, dir := range []Direction{Up, Right, Down, Left} {
+		neighbor := center.Move(dir)
+		if !isValid(grid, neighbor) || grid[neighbor.row][neighbor.col] == Obstacle {
+			// nothing to update in this direction
+			continue
+		}
+		opposite := dir.Opposite()
+		// walk out from the neighbor until you hit an existing obstacle or boundary
+		for c := neighbor; isValid(grid, c) && grid[c.row][c.col] != Obstacle; c = c.Move(dir) {
+			// record the old jump-target so we can restore later
+			old := jmp[c.row][c.col][opposite]
+			// patch it to point at 'neighbor' (the cell just before our new obstacle)
+			jmp[c.row][c.col][opposite] = neighbor
+			changeSet = append(changeSet, ChangeRecord{pos: c, origin: old, dir: opposite})
+		}
+	}
 
-    // We're going to pretend grid[center] = Obstacle here,
-    // but we don't need to modify grid itself if we update jmp.
-    for _, dir := range []Direction{Up, Right, Down, Left} {
-        neighbor := center.Move(dir)
-        if !isValid(grid, neighbor) || grid[neighbor.row][neighbor.col] == Obstacle {
-            // nothing to update in this direction
-            continue
-        }
-        opposite := dir.Opposite()
-        // walk out from the neighbor until you hit an existing obstacle or boundary
-        for c := neighbor; isValid(grid, c) && grid[c.row][c.col] != Obstacle; c = c.Move(dir) {
-            // record the old jump-target so we can restore later
-            old := jmp[c.row][c.col][opposite]
-            // patch it to point at 'neighbor' (the cell just before our new obstacle)
-            jmp[c.row][c.col][opposite] = neighbor
-            changeSet = append(changeSet, ChangeRecord{pos: c, origin: old, dir: opposite})
-        }
-    }
-
-    return changeSet
+	return changeSet
 }
 
 func (jmp JumpTable) Restore(c []ChangeRecord) {
@@ -295,7 +294,7 @@ func (sim *Simulator) CountPossibleCyclesNaive() int {
 			if co == sim.pos || sim.grid[i][j] == Obstacle {
 				continue
 			}
-			changeSet := sim.jmp.AddObstacle(co)
+			changeSet := sim.jmp.AddObstacle(sim.grid, co)
 			if !sim.Escapes() {
 				cnt++
 			}
@@ -303,6 +302,21 @@ func (sim *Simulator) CountPossibleCyclesNaive() int {
 		}
 	}
 
+	return cnt
+}
+
+func (sim *Simulator) CountPossibleCyclesFast(options []Coordinate) int {
+	cnt := 0
+	for _, co := range options {
+		if co == sim.pos || sim.grid[co.row][co.col] == Obstacle {
+			continue
+		}
+		changeSet := sim.jmp.AddObstacle(sim.grid, co)
+		if !sim.Escapes() {
+			cnt++
+		}
+		sim.jmp.Restore(changeSet)
+	}
 	return cnt
 }
 
@@ -348,7 +362,16 @@ func main() {
 	trimmed := bytes.Trim(b, "\n\r\t ")
 	lines := bytes.Split(trimmed, []byte("\n"))
 	sim := NewSimulator(lines)
-	answer := sim.CountPossibleCyclesNaive()
+	sim.RunFullUnsafe()
+	seen := make(map[Coordinate]bool, 1024)
+	unique := make([]Coordinate, 1024)
+	for _, co := range sim.path {
+		if _, exists := seen[co]; !exists {
+			unique = append(unique, co)
+		}
+		seen[co] = true
+	}
+	answer := sim.CountPossibleCyclesFast(unique)
 	fmt.Println(answer)
 	fmt.Println(time.Now().Sub(begin))
 }
