@@ -191,21 +191,29 @@ func (jmp JumpTable) UpdateDirection(data [][]byte, start Coordinate, dir Direct
 	return jmp[start.row][start.col][dir]
 }
 
-func (jmp JumpTable) AddObstacle(center Coordinate) []ChangeRecord {
-	dirs := []Direction{Up, Right, Down, Left}
-	changeSet := make([]ChangeRecord, 0, 1024)
-	for _, dir := range dirs {
-		corner := center.Move(dir)
-		end, path := jmp.PathFrom(corner, dir)
-		opposite := dir.Opposite()
-		for _, c := range path {
-			origin := jmp.Set(c, corner, opposite)
-			changeSet = append(changeSet, ChangeRecord{c, origin, opposite})
-		}
-		origin := jmp.Set(end, corner, opposite)
-		changeSet = append(changeSet, ChangeRecord{end, origin, opposite})
-	}
-	return changeSet
+func (jmp JumpTable) AddObstacle(grid [][]byte, center Coordinate) []ChangeRecord {
+    changeSet := make([]ChangeRecord, 0, 256)
+
+    // We're going to pretend grid[center] = Obstacle here,
+    // but we don't need to modify grid itself if we update jmp.
+    for _, dir := range []Direction{Up, Right, Down, Left} {
+        neighbor := center.Move(dir)
+        if !isValid(grid, neighbor) || grid[neighbor.row][neighbor.col] == Obstacle {
+            // nothing to update in this direction
+            continue
+        }
+        opposite := dir.Opposite()
+        // walk out from the neighbor until you hit an existing obstacle or boundary
+        for c := neighbor; isValid(grid, c) && grid[c.row][c.col] != Obstacle; c = c.Move(dir) {
+            // record the old jump-target so we can restore later
+            old := jmp[c.row][c.col][opposite]
+            // patch it to point at 'neighbor' (the cell just before our new obstacle)
+            jmp[c.row][c.col][opposite] = neighbor
+            changeSet = append(changeSet, ChangeRecord{pos: c, origin: old, dir: opposite})
+        }
+    }
+
+    return changeSet
 }
 
 func (jmp JumpTable) Restore(c []ChangeRecord) {
