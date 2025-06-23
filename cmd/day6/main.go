@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"time"
 )
 
 const (
@@ -19,134 +20,10 @@ const (
 	Guard    = '^'
 )
 
-type Coordinate struct {
-	row int
-	col int
-}
+type Direction int
 
-func NewCoordinate(row, col int) Coordinate {
-	return Coordinate{row, col}
-}
-
-func (c Coordinate) get(data [][]byte) byte {
-	if !isValid(data, c) {
-		return OutBounds
-	}
-	return data[c.row][c.col]
-}
-
-func (c Coordinate) up() Coordinate {
-	return Coordinate{c.row - 1, c.col}
-}
-
-func (c Coordinate) down() Coordinate {
-	return Coordinate{c.row + 1, c.col}
-}
-
-func (c Coordinate) left() Coordinate {
-	return Coordinate{c.row, c.col - 1}
-}
-
-func (c Coordinate) right() Coordinate {
-	return Coordinate{c.row, c.col + 1}
-}
-
-func (c Coordinate) dist(other Coordinate) int {
-	diff := 0
-	if c.row == other.row {
-		diff = c.col - other.col
-	} else {
-		diff = c.row - other.row
-	}
-	if diff < 0 {
-		return -diff
-	}
-	return diff
-}
-
-func (c Coordinate) move(dir int) Coordinate {
-	var none Coordinate
-	switch dir {
-	case Up:
-		{
-			return c.up()
-		}
-	case Down:
-		{
-			return c.down()
-		}
-	case Left:
-		{
-			return c.left()
-		}
-	case Right:
-		{
-			return c.right()
-		}
-	default:
-		{
-			log.Fatal("unknown direction", dir)
-			// unreachable
-			return none
-		}
-	}
-}
-
-type JumpTable struct {
-	tbl  [][][]Coordinate // three dimensions, ([row][col][destination if you go one of four directions]
-	data [][]byte
-}
-
-func BuildJumpTable(grid [][]byte) *JumpTable {
-	tbl := make([][][]Coordinate, len(grid))
-	visited := make([][][]bool, len(grid))
-	for i := range grid {
-		tbl[i] = make([][]Coordinate, len(grid[i]))
-		visited[i] = make([][]bool, len(grid[i]))
-		for j := range grid[i] {
-			tbl[i][j] = make([]Coordinate, 4)
-			visited[i][j] = make([]bool, 4)
-		}
-	}
-	jmp := &JumpTable{tbl: tbl, data: grid}
-	for i := range len(tbl) {
-		for j := range len(tbl[i]) {
-			co := NewCoordinate(i, j)
-			jmp.Update(co, Up, visited)
-			jmp.Update(co, Right, visited)
-			jmp.Update(co, Down, visited)
-			jmp.Update(co, Left, visited)
-		}
-	}
-	return jmp.tbl
-}
-
-func (jmp *JumpTable) Update(start Coordinate, dir int, visited [][][]bool) Coordinate {
-	if visited[start.row][start.col][dir] {
-		return jmp.tbl[start.row][start.col][dir]
-	}
-	next := start.move(dir)
-	if !isValid(jmp.data, next) {
-		visited[start.row][start.col][dir] = true
-		jmp.tbl[start.row][start.col][dir] = next
-		return next
-	}
-	if next.get(jmp.data) == Obstacle {
-		visited[start.row][start.col][dir] = true
-		jmp.tbl[start.row][start.col][dir] = start
-		return start
-	}
-	visited[start.row][start.col][dir] = true
-	jmp.tbl[start.row][start.col][dir] = jmp.Update(next, dir, visited)
-	return jmp.tbl[start.row][start.col][dir]
-}
-
-func (jmp *JumpTable) get(start Coordinate, dir int) Coordinate {
-	return jmp.tbl[start.row][start.col][dir]
-}
-
-func turn(direction int) int {
-	switch direction {
+func (d Direction) Turn() Direction {
+	switch d {
 	case Up:
 		{
 			return Right
@@ -164,8 +41,278 @@ func turn(direction int) int {
 			return Up
 		}
 	}
-	log.Fatal("direction should be an enum")
-	return -1
+	panic("direction should be an enum")
+}
+
+func (d Direction) Opposite() Direction {
+	switch d {
+	case Up:
+		{
+			return Down
+		}
+	case Right:
+		{
+			return Left
+		}
+	case Down:
+		{
+			return Up
+		}
+	case Left:
+		{
+			return Right
+		}
+	}
+	panic("direction should be an enum")
+}
+
+type Coordinate struct {
+	row int
+	col int
+}
+
+func NewCoordinate(row, col int) Coordinate {
+	return Coordinate{row, col}
+}
+
+func (c Coordinate) String() string {
+	return fmt.Sprintf("{row: %d, col: %d}", c.row, c.col)
+}
+
+func (c Coordinate) Get(data [][]byte) byte {
+	if !isValid(data, c) {
+		return OutBounds
+	}
+	return data[c.row][c.col]
+}
+
+func (c Coordinate) Up() Coordinate {
+	return Coordinate{c.row - 1, c.col}
+}
+
+func (c Coordinate) Down() Coordinate {
+	return Coordinate{c.row + 1, c.col}
+}
+
+func (c Coordinate) Left() Coordinate {
+	return Coordinate{c.row, c.col - 1}
+}
+
+func (c Coordinate) Right() Coordinate {
+	return Coordinate{c.row, c.col + 1}
+}
+
+func (c Coordinate) Dist(other Coordinate) int {
+	diff := 0
+	if c.row == other.row {
+		diff = c.col - other.col
+	} else {
+		diff = c.row - other.row
+	}
+	if diff < 0 {
+		return -diff
+	}
+	return diff
+}
+
+func (c Coordinate) Move(dir Direction) Coordinate {
+	switch dir {
+	case Up:
+		{
+			return c.Up()
+		}
+	case Down:
+		{
+			return c.Down()
+		}
+	case Left:
+		{
+			return c.Left()
+		}
+	case Right:
+		{
+			return c.Right()
+		}
+	default:
+		{
+			panic(fmt.Sprintf("unknown direction %d", dir))
+		}
+	}
+}
+
+type ChangeRecord struct {
+	pos    Coordinate
+	origin Coordinate
+	dir    Direction
+}
+
+type JumpTable [][][]Coordinate
+
+func BuildJumpTable(grid [][]byte) JumpTable {
+	jmp := make(JumpTable, len(grid))
+	visited := make([][][]bool, len(grid))
+	for i := range grid {
+		jmp[i] = make([][]Coordinate, len(grid[i]))
+		visited[i] = make([][]bool, len(grid[i]))
+		for j := range grid[i] {
+			jmp[i][j] = make([]Coordinate, 4)
+			visited[i][j] = make([]bool, 4)
+		}
+	}
+	for i := range len(jmp) {
+		for j := range len(jmp[i]) {
+			co := NewCoordinate(i, j)
+			jmp.UpdateDirection(grid, co, Up, visited)
+			jmp.UpdateDirection(grid, co, Right, visited)
+			jmp.UpdateDirection(grid, co, Down, visited)
+			jmp.UpdateDirection(grid, co, Left, visited)
+		}
+	}
+	return jmp
+}
+
+func (jmp JumpTable) UpdateDirection(data [][]byte, start Coordinate, dir Direction, visited [][][]bool) Coordinate {
+	if visited[start.row][start.col][dir] {
+		return jmp[start.row][start.col][dir]
+	}
+	next := start.Move(dir)
+	if !isValid(data, next) {
+		visited[start.row][start.col][dir] = true
+		jmp[start.row][start.col][dir] = next
+		return next
+	}
+	if next.Get(data) == Obstacle {
+		visited[start.row][start.col][dir] = true
+		jmp[start.row][start.col][dir] = start
+		return start
+	}
+	visited[start.row][start.col][dir] = true
+	jmp[start.row][start.col][dir] = jmp.UpdateDirection(data, next, dir, visited)
+	return jmp[start.row][start.col][dir]
+}
+
+func (jmp JumpTable) AddObstacle(center Coordinate) []ChangeRecord {
+	dirs := []Direction{Up, Right, Down, Left}
+	changeSet := make([]ChangeRecord, 0, 1024)
+	for _, dir := range dirs {
+		corner := center.Move(dir)
+		end, path := jmp.PathFrom(corner, dir)
+		opposite := dir.Opposite()
+		for _, c := range path {
+			origin := jmp.Set(c, corner, opposite)
+			changeSet = append(changeSet, ChangeRecord{c, origin, opposite})
+		}
+		origin := jmp.Set(end, corner, opposite)
+		changeSet = append(changeSet, ChangeRecord{end, origin, opposite})
+	}
+	return changeSet
+}
+
+func (jmp JumpTable) Restore(c []ChangeRecord) {
+	for _, change := range c {
+		jmp.Set(change.pos, change.origin, change.dir)
+	}
+}
+
+func (jmp JumpTable) Set(pos, val Coordinate, dir Direction) Coordinate {
+	if !isValid(jmp, pos) {
+		return Coordinate{}
+	}
+	origin := jmp[pos.row][pos.col][dir]
+	jmp[pos.row][pos.col][dir] = val
+	return origin
+}
+
+func (jmp JumpTable) Get(start Coordinate, dir Direction) Coordinate {
+	if !isValid(jmp, start) {
+		return start
+	}
+	return jmp[start.row][start.col][dir]
+}
+
+func (jmp JumpTable) PathFrom(start Coordinate, dir Direction) (Coordinate, []Coordinate) {
+	end := jmp.Get(start, dir)
+	path := make([]Coordinate, 0, start.Dist(end))
+	for end != start && isValid(jmp, start) {
+		path = append(path, start)
+		start = start.Move(dir)
+	}
+	return end, path
+}
+
+type Simulator struct {
+	pos  Coordinate
+	grid [][]byte
+	jmp  JumpTable
+	path []Coordinate
+}
+
+func NewSimulator(grid [][]byte) *Simulator {
+	jmp := BuildJumpTable(grid)
+	pos := getStartPos(grid)
+	path := make([]Coordinate, 0, 8192)
+	return &Simulator{pos, grid, jmp, path}
+}
+
+func (sim *Simulator) RunFullUnsafe() {
+	start := sim.pos
+	dir := Direction(Up) // this is always the default
+	for isValid(sim.grid, start) {
+		next, path := sim.jmp.PathFrom(start, dir)
+		sim.path = append(sim.path, path...)
+		start = next
+		dir = dir.Turn()
+	}
+	return
+}
+
+func (sim *Simulator) RunFastUnsafe() {
+	start := sim.pos
+	sim.path = append(sim.path, start)
+	dir := Direction(Up) // this is always the default
+	for isValid(sim.grid, start) {
+		next := sim.jmp.Get(start, dir)
+		start = next
+		dir = dir.Turn()
+		sim.path = append(sim.path, start)
+	}
+	return
+}
+
+func (sim *Simulator) CountPossibleCyclesNaive() int {
+	cnt := 0
+	for i := range sim.grid {
+		for j := range sim.grid[i] {
+			co := Coordinate{i, j}
+			if co == sim.pos || sim.grid[i][j] == Obstacle {
+				continue
+			}
+			changeSet := sim.jmp.AddObstacle(co)
+			if !sim.Escapes() {
+				cnt++
+			}
+			sim.jmp.Restore(changeSet)
+		}
+	}
+
+	return cnt
+}
+
+func (sim *Simulator) Escapes() bool {
+	slowDir, fastDir := Direction(Up), Direction(Up) // this is always the default
+	slow, fast := sim.pos, sim.pos
+	for isValid(sim.grid, fast) {
+		slow = sim.jmp.Get(slow, slowDir)
+		slowDir = slowDir.Turn()
+		fast = sim.jmp.Get(fast, fastDir)
+		fastDir = fastDir.Turn()
+		fast = sim.jmp.Get(fast, fastDir)
+		fastDir = fastDir.Turn()
+		if slow == fast && slowDir == fastDir {
+			return false
+		}
+	}
+	return true
 }
 
 func getStartPos(b [][]byte) Coordinate {
@@ -176,11 +323,10 @@ func getStartPos(b [][]byte) Coordinate {
 			}
 		}
 	}
-	log.Fatal("getStartPos() No guard found")
-	return NewCoordinate(0, 0)
+	panic("getStartPos() No guard found")
 }
 
-func isValid(b [][]byte, c Coordinate) bool {
+func isValid[T any](b [][]T, c Coordinate) bool {
 	n, m := len(b), len(b[0])
 	return c.row >= 0 && c.row < n && c.col >= 0 && c.col < m
 }
@@ -190,47 +336,24 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+	begin := time.Now()
 	trimmed := bytes.Trim(b, "\n\r\t ")
 	lines := bytes.Split(trimmed, []byte("\n"))
-	jmp := BuildJumpTable(lines)
-	curr := getStartPos(jmp.data)
-	dist := 0
-	direction := Up
-	quit := false
-	for !quit {
-		next := jmp.get(curr, direction)
-		nextNeighbor := next.move(direction)
-		if !isValid(jmp.data, nextNeighbor) {
-			break
-		}
-		dist += curr.dist(next)
-		curr = next
-		direction = turn(direction)
-	}
-	fmt.Println(dist)
+	sim := NewSimulator(lines)
+	answer := sim.CountPossibleCyclesNaive()
+	fmt.Println(answer)
+	fmt.Println(time.Now().Sub(begin))
 }
 
-func deepCopyBytes(original [][]byte) [][]byte {
-	if original == nil {
-		return nil
-	}
-	cp := make([][]byte, len(original))
-	for i, inner := range original {
-		cp[i] = make([]byte, len(inner))
-		copy(cp[i], inner)
-	}
-	return cp
+var testLines = [][]byte{
+	{'.', '.', '.', '#', '.', '.', '.', '.', '.', '.'},
+	{'.', '.', '.', '.', '.', '.', '#', '.', '.', '.'},
+	{'.', '.', '.', '.', '.', '.', '.', '.', '.', '.'},
+	{'.', '.', '#', '^', '.', '.', '.', '.', '.', '.'},
+	{'.', '.', '.', '.', '.', '.', '.', '.', '.', '.'},
+	{'.', '.', '.', '.', '.', '.', '.', '.', '.', '.'},
+	{'.', '.', '.', '.', '.', '.', '.', '.', '.', '.'},
+	{'.', '.', '.', '.', '.', '.', '.', '.', '.', '.'},
+	{'.', '.', '.', '.', '.', '.', '.', '.', '.', '.'},
+	{'.', '.', '.', '.', '.', '.', '.', '.', '.', '.'},
 }
-
-// lines := [][]byte{
-// 	{'.', '.', '.', '#', '.', '.', '#', '.', '.', '.'},
-// 	{'.', '.', '.', '.', '.', '.', '.', '.', '.', '.'},
-// 	{'.', '.', '.', '.', '.', '.', '.', '.', '.', '.'},
-// 	{'.', '.', '.', '#', '.', '.', '.', '.', '.', '.'},
-// 	{'.', '.', '.', '.', '.', '.', '.', '.', '.', '.'},
-// 	{'.', '.', '.', '.', '.', '.', '.', '.', '.', '.'},
-// 	{'.', '.', '.', '.', '.', '.', '.', '.', '.', '.'},
-// 	{'.', '.', '.', '.', '.', '.', '.', '.', '.', '.'},
-// 	{'.', '.', '.', '.', '.', '.', '.', '.', '.', '.'},
-// 	{'.', '.', '.', '.', '.', '.', '.', '.', '.', '.'},
-// }

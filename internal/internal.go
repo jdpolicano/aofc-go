@@ -21,3 +21,15 @@ func FilterSlice[T any](slice []T, f func(T) bool) []T {
 func InRange(i, j, k int) bool {
 	return i <= k && k <= j
 }
+
+func DeepCopyBytes(original [][]byte) [][]byte {
+	if original == nil {
+		return nil
+	}
+	cp := make([][]byte, len(original))
+	for i, inner := range original {
+		cp[i] = make([]byte, len(inner))
+		copy(cp[i], inner)
+	}
+	return cp
+}
