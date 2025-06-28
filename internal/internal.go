@@ -1,5 +1,7 @@
 package internal
 
+import "fmt"
+
 func MapSlice[T any, U any](slice []T, f func(T) U) []U {
 	result := make([]U, len(slice))
 	for i, v := range slice {
@@ -32,4 +34,18 @@ func DeepCopyBytes(original [][]byte) [][]byte {
 		copy(cp[i], inner)
 	}
 	return cp
+}
+
+type Location [2]int
+
+func (n Location) String() string {
+	return fmt.Sprintf("{ row: %d, col: %d }", n.Row(), n.Col())
+}
+
+func (n Location) Row() int {
+	return n[0]
+}
+
+func (n Location) Col() int {
+	return n[1]
 }

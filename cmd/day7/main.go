@@ -5,86 +5,72 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"strconv"
-	"sync"
-	"sync/atomic"
 )
 
-type Equation struct {
-	sum   int64
-	parts []int64
+type Location [2]int
+
+func (n Location) String() string {
+	return fmt.Sprintf("{ row: %d, col: %d }", n.Row(), n.Col())
 }
 
-func NewEquation() *Equation {
-	return &Equation{
-		sum:   0,
-		parts: make([]int64, 0),
+func (n Location) Row() int {
+	return n[0]
+}
+
+func (n Location) Col() int {
+	return n[1]
+}
+
+func (n Location) Antinodes(other Location) [2]Location {
+	r1, c1, r2, c2 := n.Row(), n.Col(), other.Row(), other.Col()
+	rDiff, cDiff := r1-r2, c1-c2
+	return [2]Location{
+		n.Offset(rDiff, cDiff),
+		other.Offset(-rDiff, -cDiff),
 	}
 }
 
-// parses a line of input into an Equation object
-// the line is expected to be in the format "<sum>: <part1> <part2> ... <partN>"
-func ParseEquation(line string) *Equation {
-	parts := bytes.Split([]byte(line), []byte(": "))
-	if len(parts) != 2 {
-		log.Fatalf("Invalid equation format: %s", line)
-	}
-
-	eq := NewEquation()
-	sum, err := strconv.ParseInt(string(parts[0]), 10, 64)
-	if err != nil {
-		log.Fatalf("Invalid sum in equation: %s", line)
-	}
-	eq.sum = sum
-	partStrings := bytes.Split(parts[1], []byte(" "))
-	for _, partStr := range partStrings {
-		part, err := strconv.ParseInt(string(partStr), 10, 64)
-		if err != nil {
-			log.Fatalf("Invalid part in equation: %s", line)
-		}
-		eq.PushPart(part)
-	}
-
-	return eq
+func (n Location) Offset(rDiff, cDiff int) Location {
+	return Location{n.Row() + rDiff, n.Col() + cDiff}
 }
 
-// will try to concatenate the top two parts in the list together and continue computation from there
-func tryConcat(acc, target int64, parts []int64) bool {
-	if len(parts) < 1 {
-		return false
-	}
-	newPart := fmt.Sprintf("%d%d", acc, parts[0])
-	newPartInt, err := strconv.ParseInt(newPart, 10, 64)
-	if err != nil {
-		log.Fatalf("Invalid concatenation result: %s", newPart)
-	}
-	return backtrack(newPartInt, target, parts[1:])
-}
-
-func backtrack(acc, target int64, parts []int64) bool {
-	if len(parts) == 0 {
-		return acc == target
+func (n Location) AllAntinodes(other Location, inBounds func(Location) bool) []Location {
+	antis := make([]Location, 0, 32)
+	r1, c1, r2, c2 := n.Row(), n.Col(), other.Row(), other.Col()
+	rDiff, cDiff := r1-r2, c1-c2
+	// first calulate all of the antis going "up"
+	curr := n.Offset(rDiff, cDiff)
+	for inBounds(curr) {
+		antis = append(antis, curr)
+		curr = curr.Offset(rDiff, cDiff)
 	}
 
-	if acc > target {
-		return false
+	// then calulate all of the antis going "down"
+	curr = other.Offset(-rDiff, -cDiff)
+	for inBounds(curr) {
+		antis = append(antis, curr)
+		curr = curr.Offset(-rDiff, -cDiff)
 	}
-
-	return backtrack(acc+parts[0], target, parts[1:]) ||
-		backtrack(acc*parts[0], target, parts[1:]) ||
-		tryConcat(acc, target, parts)
+	return antis
 }
 
-func (e *Equation) IsSolvable() bool {
-	return backtrack(e.parts[0], e.sum, e.parts[1:])
+// safely sets a value into a map[K][]V - if the key doesn't exist it is created.
+func set[K comparable, V any](m map[K][]V, key K, value V) {
+	if list, exists := m[key]; exists {
+		m[key] = append(list, value)
+	} else {
+		list := make([]V, 0, 1024)
+		list = append(list, value)
+		m[key] = list
+	}
 }
 
-func (e *Equation) PushPart(part int64) {
-	e.parts = append(e.parts, part)
-}
-
-func (e *Equation) String() string {
-	return fmt.Sprintf("Sum: %d, Parts: %v", e.sum, e.parts)
+func makeInBoundsFn[T any](arr [][]T) func(Location) bool {
+	maxR := len(arr)
+	maxC := len(arr[0])
+	return func(n Location) bool {
+		return n.Row() >= 0 && n.Row() < maxR && n.Col() >= 0 && n.Col() < maxC
+	}
 }
 
 func main() {
@@ -94,20 +80,40 @@ func main() {
 	}
 	trimmed := bytes.Trim(b, "\n\r\t ")
 	lines := bytes.Split(trimmed, []byte("\n"))
-	sum := int64(0)
-	wg := &sync.WaitGroup{}
-	for _, line := range lines {
-		wg.Add(1)
-		go runLine(line, &sum, wg)
+	nodes := make(map[byte][]Location)
+	antinodes := make(map[Location][]byte)
+	inBounds := makeInBoundsFn(lines)
+	for r := range lines {
+		for c := range lines[r] {
+			// if there isn't a node here, move on
+			if lines[r][c] == '.' {
+				continue
+			}
+			// now, check the lines between this node and the others of the same type we have passed.
+			if prev, exists := nodes[lines[r][c]]; exists {
+				// for each previous node...
+				for _, loc := range prev {
+					// get the two nodes that are colinear
+					antis := Location{r, c}.AllAntinodes(loc, inBounds)
+					// if they are inbounds, add them to the list of antinodes at {r,c}
+					for _, l := range antis {
+						set(antinodes, l, lines[r][c])
+					}
+				}
+			}
+			set(nodes, lines[r][c], Location{r, c})
+		}
 	}
-	wg.Wait()
-	fmt.Println("Total sum of solvable equations:", atomic.LoadInt64(&sum))
-}
-
-func runLine(line []byte, sum *int64, wg *sync.WaitGroup) {
-	equation := ParseEquation(string(line))
-	if equation.IsSolvable() {
-		atomic.AddInt64(sum, equation.sum)
+	for k := range antinodes {
+		fmt.Println(k, string(antinodes[k]))
 	}
-	wg.Done()
+	fmt.Println("before including the nodes themsevles, ", len(antinodes))
+	for c, occurances := range nodes {
+		if len(occurances) > 2 {
+			for _, l := range occurances {
+				set(antinodes, l, c)
+			}
+		}
+	}
+	fmt.Println("final count", len(antinodes))
 }
